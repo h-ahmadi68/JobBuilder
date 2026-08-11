@@ -1,0 +1,6 @@
+spring:
+  application:
+    name: JobBuilder
+server:
+  port: 8082
+
