@@ -3,6 +3,8 @@ package org.example.job_builder.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.job_builder.config.FlinkConfiguration;
+import org.example.job_builder.config.KafkaJobProperties;
+import org.example.job_builder.config.RedisJobProperties;
 import org.example.job_builder.model.WindowSpec;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.HttpEntity;
@@ -28,11 +30,13 @@ public class JobLaunchService {
 
     private final RestTemplate restTemplate;
     private final FlinkConfiguration flinkConfiguration;
+    private final KafkaJobProperties kafkaJobProperties;
+    private final RedisJobProperties redisJobProperties;
 
     private volatile String cachedJarId;
 
-    public String startTotalLinkSentJob(WindowSpec windowRequest) {
-        String jobId = submitJob(windowRequest, TOTAL_ENTRY_CLASS);
+    public String startTotalLinkSentJob(WindowSpec windowSpec) {
+        String jobId = submitJob(windowSpec, TOTAL_ENTRY_CLASS);
         return "TotalRequestCountJob submitted. Job ID: " + jobId;
     }
 
@@ -47,20 +51,34 @@ public class JobLaunchService {
         return jobId;
     }
 
-    private String buildProgramArgs(WindowSpec request) {
+    private String buildProgramArgs(WindowSpec windowSpec) {
         StringJoiner joiner = new StringJoiner(" ");
-        joiner.add("--windowType").add(request.windowType().name());
-
-        appendIfPresent(joiner, "--windowSize", request.windowSize());
-        appendIfPresent(joiner, "--windowSlide", request.windowSlide());
-        appendIfPresent(joiner, "--sessionGap", request.sessionGap());
-
+        appendWindowArgs(joiner, windowSpec);
+        appendKafkaArgs(joiner);
+        appendRedisArgs(joiner);
         return joiner.toString();
+    }
+
+    private void appendWindowArgs(StringJoiner joiner, WindowSpec spec) {
+        joiner.add("--windowType").add(spec.windowType().name());
+        appendIfPresent(joiner, "--windowSize", spec.windowSize());
+        appendIfPresent(joiner, "--windowSlide", spec.windowSlide());
+        appendIfPresent(joiner, "--sessionGap", spec.sessionGap());
+    }
+
+    private void appendKafkaArgs(StringJoiner joiner) {
+        joiner.add("--bootstrapServers").add(kafkaJobProperties.bootstrapServers());
+        joiner.add("--sourceTopic").add(kafkaJobProperties.sourceTopic());
+    }
+
+    private void appendRedisArgs(StringJoiner joiner) {
+        joiner.add("--redisHost").add(redisJobProperties.host());
+        joiner.add("--redisPort").add(String.valueOf(redisJobProperties.port()));
     }
 
     private void appendIfPresent(StringJoiner joiner, String flag, Duration value) {
         if (value != null) {
-            joiner.add(flag).add(String.valueOf(value.toSeconds()));
+            joiner.add(flag).add(value.toString());
         }
     }
 
@@ -137,4 +155,5 @@ public class JobLaunchService {
         String filename = (String) response.get("filename");
         return new File(filename).getName();
     }
+
 }

@@ -19,8 +19,8 @@ class JobBuilderController {
 
     @PostMapping
     public ResponseEntity<String> launch(@Valid @RequestBody WindowSpec request) {
-        jobLaunchService.launchTotalLinkSentCountJob(request);
-        return ResponseEntity.accepted().body("جاب در پس‌زمینه شروع شد");
+        String jobId = jobLaunchService.startTotalLinkSentJob(request);
+        return ResponseEntity.accepted().body(jobId);
     }
 
 }
