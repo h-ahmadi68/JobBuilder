@@ -9,5 +9,12 @@ flink:
     host: localhost
     port: 8081
   job-jar-path: target/flink-request-counter-1.0.0-flink-job.jar
-  redis-host-in-cluster: redis
-  redis-port-in-cluster: 6379
+
+flink-job:
+  kafka:
+    bootstrap-servers: localhost:9092
+    source-topic: payment_events
+  redis:
+    host: localhost
+    port: 6379
+    key-prefix: link-sent-count
