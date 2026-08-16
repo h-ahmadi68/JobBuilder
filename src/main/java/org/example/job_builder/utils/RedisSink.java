@@ -1,38 +1,62 @@
 package org.example.job_builder.utils;
 
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
+import org.apache.flink.api.connector.sink2.Sink;
+import org.apache.flink.api.connector.sink2.SinkWriter;
+import org.apache.flink.api.connector.sink2.WriterInitContext;
+import org.example.job_builder.model.WindowedCount;
 import redis.clients.jedis.Jedis;
 
-public class RedisSink extends RichSinkFunction<Long> {
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+
+public class RedisSink implements Sink<WindowedCount> {
 
     private final String host;
     private final int port;
-    private final String key;
+    private final String keyPrefix;
 
-    private transient Jedis jedis;
-
-    public RedisSink(String host, int port, String key) {
+    public RedisSink(String host, int port, String keyPrefix) {
         this.host = host;
         this.port = port;
-        this.key = key;
+        this.keyPrefix = keyPrefix;
     }
 
     @Override
-    public void open(Configuration parameters) {
-        jedis = new Jedis(host, port);
+    public SinkWriter<WindowedCount> createWriter(WriterInitContext context) {
+        return new RedisSinkWriter(host, port, keyPrefix);
     }
 
-    @Override
-    public void invoke(Long value, Context context) {
-        jedis.set(key, String.valueOf(value));
-    }
+    private static class RedisSinkWriter implements SinkWriter<WindowedCount> {
 
-    @Override
-    public void close() {
-        if (jedis != null) {
+        private static final DateTimeFormatter FORMATTER =
+                DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss")
+                        .withZone(ZoneId.systemDefault());
+
+        private final String keyPrefix;
+        private final Jedis jedis;
+
+        RedisSinkWriter(String host, int port, String keyPrefix) {
+            this.keyPrefix = keyPrefix;
+            this.jedis = new Jedis(host, port);
+        }
+
+        @Override
+        public void write(WindowedCount value, Context context) {
+            String start = FORMATTER.format(Instant.ofEpochMilli(value.windowStart()));
+            String end = FORMATTER.format(Instant.ofEpochMilli(value.windowEnd()));
+            String key = keyPrefix + start + "-to-" + end;
+
+            jedis.set(key, String.valueOf(value.count()));
+        }
+
+        @Override
+        public void flush(boolean endOfInput) {
+        }
+
+        @Override
+        public void close() {
             jedis.close();
         }
     }
-
 }

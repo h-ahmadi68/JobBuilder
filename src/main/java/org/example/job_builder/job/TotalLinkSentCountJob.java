@@ -2,21 +2,25 @@ package org.example.job_builder.job;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.typeinfo.Types;
-import org.apache.flink.api.java.utils.ParameterTool;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.windowing.ProcessAllWindowFunction;
 import org.apache.flink.streaming.api.windowing.assigners.WindowAssigner;
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
+import org.apache.flink.util.Collector;
+import org.apache.flink.util.ParameterTool;
+import org.example.event.AskForLink;
 import org.example.event.PaymentEvent;
-import org.example.event.SendLink;
 import org.example.job_builder.model.WindowSpec;
 import org.example.job_builder.model.WindowType;
+import org.example.job_builder.model.WindowedCount;
 import org.example.job_builder.service.WindowAssignerFactory;
 import org.example.job_builder.utils.PaymentEventSourceFactory;
 import org.example.job_builder.utils.RedisSink;
 
 import java.time.Duration;
+import java.util.Arrays;
 
 public class TotalLinkSentCountJob {
 
@@ -45,6 +49,7 @@ public class TotalLinkSentCountJob {
 
     public static void main(String[] args) throws Exception {
         ParameterTool params = ParameterTool.fromArgs(args);
+        System.out.println(Arrays.toString(args));
 
         WindowSpec windowSpec = parseWindowSpec(params);
         WindowAssigner<Object, TimeWindow> assigner = WindowAssignerFactory.from(windowSpec);
@@ -81,14 +86,22 @@ public class TotalLinkSentCountJob {
                 "payment_events_source"
         );
 
-        DataStream<Long> counts = events
-                .filter(e -> e instanceof SendLink)
+        DataStream<WindowedCount> counts = events
+                .filter(e -> e instanceof AskForLink)
                 .map(e -> 1L)
                 .returns(Types.LONG)
                 .windowAll(windowAssigner)
-                .reduce(Long::sum);
+                .reduce(Long::sum, new ProcessAllWindowFunction<Long, WindowedCount, TimeWindow>() {
+                    @Override
+                    public void process(Context context, Iterable<Long> elements, Collector<WindowedCount> out) {
+                        long count = elements.iterator().next();
+                        TimeWindow window = context.window();
+                        out.collect(new WindowedCount(count, window.getStart(), window.getEnd()));
+                    }
+                })
+                .returns(Types.POJO(WindowedCount.class));
 
-        counts.addSink(new RedisSink(redisHost, redisPort, redisKeyPrefix));
+        counts.sinkTo(new RedisSink(redisHost, redisPort, redisKeyPrefix));
 
         env.execute(TOTAL_LINK_SENT_COUNT_JOB);
     }

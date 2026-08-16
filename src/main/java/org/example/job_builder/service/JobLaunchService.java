@@ -17,6 +17,7 @@ import org.springframework.web.client.RestTemplate;
 
 import java.io.File;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.Objects;
 import java.util.StringJoiner;
@@ -55,7 +56,7 @@ public class JobLaunchService {
         StringJoiner joiner = new StringJoiner(" ");
         appendWindowArgs(joiner, windowSpec);
         appendKafkaArgs(joiner);
-        appendRedisArgs(joiner);
+        appendRedisArgs(joiner, windowSpec);
         return joiner.toString();
     }
 
@@ -71,9 +72,10 @@ public class JobLaunchService {
         joiner.add("--sourceTopic").add(kafkaJobProperties.sourceTopic());
     }
 
-    private void appendRedisArgs(StringJoiner joiner) {
+    private void appendRedisArgs(StringJoiner joiner, WindowSpec windowSpec) {
         joiner.add("--redisHost").add(redisJobProperties.host());
         joiner.add("--redisPort").add(String.valueOf(redisJobProperties.port()));
+        joiner.add("--redisKeyPrefix").add("TotalLinkSent-" + windowSpec.windowType() + "-"); //TODO this should be for each task
     }
 
     private void appendIfPresent(StringJoiner joiner, String flag, Duration value) {
@@ -86,7 +88,7 @@ public class JobLaunchService {
     private Map<String, Object> runJobOnFlink(String jarId, String entryClass, String programArgs) {
         Map<String, Object> body = Map.of(
                 "entryClass", entryClass,
-                "programArgs", programArgs
+                "programArgsList", Arrays.asList(programArgs.split(" "))
         );
 
         HttpHeaders headers = new HttpHeaders();

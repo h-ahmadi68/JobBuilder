@@ -17,8 +17,8 @@ class JobBuilderController {
 
     private final JobLaunchService jobLaunchService;
 
-    @PostMapping
-    public ResponseEntity<String> launch(@Valid @RequestBody WindowSpec request) {
+    @PostMapping("start-total-link-sent")
+    public ResponseEntity<String> startTotalLinkSent(@Valid @RequestBody WindowSpec request) {
         String jobId = jobLaunchService.startTotalLinkSentJob(request);
         return ResponseEntity.accepted().body(jobId);
     }
