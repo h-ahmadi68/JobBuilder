@@ -18,12 +18,6 @@ public class FlinkConfiguration {
     @Value("${flink.job-jar-path}")
     private String jobJarPath;
 
-    @Value("${flink.redis-host-in-cluster}")
-    private String redisHostInCluster;
-
-    @Value("${flink.redis-port-in-cluster}")
-    private String redisPortInCluster;
-
     public String flinkBaseUrl() {
         return String.format("http://%s:%d", jobManagerHost, jobManagerPort);
     }
