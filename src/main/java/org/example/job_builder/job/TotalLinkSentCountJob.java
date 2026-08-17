@@ -20,18 +20,10 @@ import org.example.job_builder.utils.PaymentEventSourceFactory;
 import org.example.job_builder.utils.RedisSink;
 
 import java.time.Duration;
-import java.util.Arrays;
 
-public class TotalLinkSentCountJob {
+public class TotalLinkSentCountJob extends AbstractJob {
 
     public static final String TOTAL_LINK_SENT_COUNT_JOB = "total-link-sent-count-job";
-
-    private final WindowAssigner<Object, TimeWindow> windowAssigner;
-    private final String bootstrapServers;
-    private final String sourceTopic;
-    private final String redisHost;
-    private final int redisPort;
-    private final String redisKeyPrefix;
 
     public TotalLinkSentCountJob(WindowAssigner<Object, TimeWindow> windowAssigner,
                                  String bootstrapServers,
@@ -39,17 +31,11 @@ public class TotalLinkSentCountJob {
                                  String redisHost,
                                  int redisPort,
                                  String redisKeyPrefix) {
-        this.windowAssigner = windowAssigner;
-        this.bootstrapServers = bootstrapServers;
-        this.sourceTopic = sourceTopic;
-        this.redisHost = redisHost;
-        this.redisPort = redisPort;
-        this.redisKeyPrefix = redisKeyPrefix;
+        super(bootstrapServers, sourceTopic, redisHost, redisPort, redisKeyPrefix, windowAssigner);
     }
 
     public static void main(String[] args) throws Exception {
         ParameterTool params = ParameterTool.fromArgs(args);
-        System.out.println(Arrays.toString(args));
 
         WindowSpec windowSpec = parseWindowSpec(params);
         WindowAssigner<Object, TimeWindow> assigner = WindowAssignerFactory.from(windowSpec);
@@ -65,6 +51,7 @@ public class TotalLinkSentCountJob {
     }
 
     private static WindowSpec parseWindowSpec(ParameterTool params) {
+
         return WindowSpec.builder()
                 .windowType(WindowType.valueOf(params.getRequired("windowType")))
                 .windowSize(params.has("windowSize") ? Duration.parse(params.get("windowSize")) : null)
@@ -86,24 +73,31 @@ public class TotalLinkSentCountJob {
                 "payment_events_source"
         );
 
-        DataStream<WindowedCount> counts = events
-                .filter(e -> e instanceof AskForLink)
+        events.filter(e -> e instanceof AskForLink)
                 .map(e -> 1L)
                 .returns(Types.LONG)
                 .windowAll(windowAssigner)
-                .reduce(Long::sum, new ProcessAllWindowFunction<Long, WindowedCount, TimeWindow>() {
-                    @Override
-                    public void process(Context context, Iterable<Long> elements, Collector<WindowedCount> out) {
-                        long count = elements.iterator().next();
-                        TimeWindow window = context.window();
-                        out.collect(new WindowedCount(count, window.getStart(), window.getEnd()));
-                    }
-                })
-                .returns(Types.POJO(WindowedCount.class));
-
-        counts.sinkTo(new RedisSink(redisHost, redisPort, redisKeyPrefix));
+                .reduce(Long::sum, new WindowedCountProcessFunction())
+                .returns(Types.POJO(WindowedCount.class))
+                .sinkTo(new RedisSink(redisHost, redisPort, redisKeyPrefix));
 
         env.execute(TOTAL_LINK_SENT_COUNT_JOB);
+    }
+
+    private static class WindowedCountProcessFunction extends ProcessAllWindowFunction<Long, WindowedCount, TimeWindow> {
+
+        /**
+         * @param context info about processing window
+         * @param elements it has only on element(count of link sent) why?
+         * @param out output of process, has only on element in it
+         */
+        @Override
+        public void process(Context context, Iterable<Long> elements, Collector<WindowedCount> out) {
+            long count = elements.iterator().next();
+            TimeWindow window = context.window();
+            out.collect(new WindowedCount(count, window.getStart(), window.getEnd()));
+        }
+
     }
 
 }

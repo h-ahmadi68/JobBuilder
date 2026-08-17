@@ -5,6 +5,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.job_builder.config.FlinkConfiguration;
 import org.example.job_builder.config.KafkaJobProperties;
 import org.example.job_builder.config.RedisJobProperties;
+import org.example.job_builder.flink.FlinkJobRequest;
+import org.example.job_builder.flink.impl.TotalLinkSentJobRequest;
+import org.example.job_builder.flink.impl.TotalRejectedLinkJobRequest;
+import org.example.job_builder.job.TotalLinkSentCountJob;
+import org.example.job_builder.job.TotalRejectedLinkCountJob;
 import org.example.job_builder.model.WindowSpec;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.HttpEntity;
@@ -16,18 +21,14 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 
 import java.io.File;
-import java.time.Duration;
-import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.StringJoiner;
 
 @RequiredArgsConstructor
 @Slf4j
 @Service
 public class JobLaunchService {
-
-    private static final String TOTAL_ENTRY_CLASS = "org.example.job_builder.job.TotalLinkSentCountJob";
 
     private final RestTemplate restTemplate;
     private final FlinkConfiguration flinkConfiguration;
@@ -37,58 +38,45 @@ public class JobLaunchService {
     private volatile String cachedJarId;
 
     public String startTotalLinkSentJob(WindowSpec windowSpec) {
-        String jobId = submitJob(windowSpec, TOTAL_ENTRY_CLASS);
-        return "TotalRequestCountJob submitted. Job ID: " + jobId;
+        FlinkJobRequest<TotalLinkSentCountJob> request = TotalLinkSentJobRequest.builder()
+                .bootstrapServers(kafkaJobProperties.bootstrapServers())
+                .sourceTopic(kafkaJobProperties.sourceTopic())
+                .redisHost(redisJobProperties.host())
+                .redisPort(redisJobProperties.port())
+                .windowSpec(windowSpec)
+                .build();
+
+        return submitJob(request);
     }
 
-    private String submitJob(WindowSpec windowSpec, String entryClass) {
-        String jarId = ensureJarUploaded();
-        String programArgs = buildProgramArgs(windowSpec);
+    public String startTotalRejectedLinkJob(WindowSpec windowSpec) {
+        FlinkJobRequest<TotalRejectedLinkCountJob> request = TotalRejectedLinkJobRequest.builder()
+                .bootstrapServers(kafkaJobProperties.bootstrapServers())
+                .sourceTopic(kafkaJobProperties.sourceTopic())
+                .redisHost(redisJobProperties.host())
+                .redisPort(redisJobProperties.port())
+                .windowSpec(windowSpec)
+                .build();
 
-        Map<String, Object> response = runJobOnFlink(jarId, entryClass, programArgs);
+        return submitJob(request);
+    }
+
+    private String submitJob(FlinkJobRequest<?> request) {
+        String jarId = ensureJarUploaded();
+        List<String> programArgs = request.getProgramArgs();
+
+        Map<String, Object> response = runJobOnFlink(jarId, request.entryClass(), programArgs);
         String jobId = extractJobId(response);
 
-        log.info("Job submitted to Flink cluster. Entry class: {}, Job ID: {}", entryClass, jobId);
+        log.info("Job submitted to Flink cluster. Entry class: {}, Job ID: {}", request.entryClass(), jobId);
         return jobId;
     }
 
-    private String buildProgramArgs(WindowSpec windowSpec) {
-        StringJoiner joiner = new StringJoiner(" ");
-        appendWindowArgs(joiner, windowSpec);
-        appendKafkaArgs(joiner);
-        appendRedisArgs(joiner, windowSpec);
-        return joiner.toString();
-    }
-
-    private void appendWindowArgs(StringJoiner joiner, WindowSpec spec) {
-        joiner.add("--windowType").add(spec.windowType().name());
-        appendIfPresent(joiner, "--windowSize", spec.windowSize());
-        appendIfPresent(joiner, "--windowSlide", spec.windowSlide());
-        appendIfPresent(joiner, "--sessionGap", spec.sessionGap());
-    }
-
-    private void appendKafkaArgs(StringJoiner joiner) {
-        joiner.add("--bootstrapServers").add(kafkaJobProperties.bootstrapServers());
-        joiner.add("--sourceTopic").add(kafkaJobProperties.sourceTopic());
-    }
-
-    private void appendRedisArgs(StringJoiner joiner, WindowSpec windowSpec) {
-        joiner.add("--redisHost").add(redisJobProperties.host());
-        joiner.add("--redisPort").add(String.valueOf(redisJobProperties.port()));
-        joiner.add("--redisKeyPrefix").add("TotalLinkSent-" + windowSpec.windowType() + "-"); //TODO this should be for each task
-    }
-
-    private void appendIfPresent(StringJoiner joiner, String flag, Duration value) {
-        if (value != null) {
-            joiner.add(flag).add(value.toString());
-        }
-    }
-
     @SuppressWarnings("unchecked")
-    private Map<String, Object> runJobOnFlink(String jarId, String entryClass, String programArgs) {
+    private Map<String, Object> runJobOnFlink(String jarId, String entryClass, List<String> programArgs) {
         Map<String, Object> body = Map.of(
                 "entryClass", entryClass,
-                "programArgsList", Arrays.asList(programArgs.split(" "))
+                "programArgsList", programArgs
         );
 
         HttpHeaders headers = new HttpHeaders();
