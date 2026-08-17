@@ -1,5 +1,6 @@
 package org.example.job_builder.job;
 
+import lombok.experimental.SuperBuilder;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.AggregateFunction;
 import org.apache.flink.api.common.typeinfo.Types;
@@ -7,7 +8,6 @@ import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.windowing.ProcessAllWindowFunction;
-import org.apache.flink.streaming.api.windowing.assigners.WindowAssigner;
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.ParameterTool;
@@ -15,46 +15,26 @@ import org.example.event.PaymentEvent;
 import org.example.event.RejectLink;
 import org.example.event.SendLink;
 import org.example.job_builder.model.RejectedLinkState;
-import org.example.job_builder.model.WindowSpec;
-import org.example.job_builder.model.WindowType;
-import org.example.job_builder.service.WindowAssignerFactory;
 import org.example.job_builder.utils.PaymentEventSourceFactory;
 import org.example.job_builder.utils.RejectedLinkRedisSink;
 
 import java.time.Duration;
 
+@SuperBuilder
 public class TotalRejectedLinkCountJob extends AbstractJob {
 
     public static final String TOTAL_REJECTED_LINK_COUNT_JOB = "total-rejected-link-count-job";
 
-    public TotalRejectedLinkCountJob(String bootstrapServers, String sourceTopic, String redisHost, int redisPort, String redisKeyPrefix, WindowAssigner<Object, TimeWindow> windowAssigner) {
-        super(bootstrapServers, sourceTopic, redisHost, redisPort, redisKeyPrefix, windowAssigner);
-    }
-
     public static void main(String[] args) throws Exception {
         ParameterTool params = ParameterTool.fromArgs(args);
 
-        WindowSpec windowSpec = parseWindowSpec(params);
-        WindowAssigner<Object, TimeWindow> assigner = WindowAssignerFactory.from(windowSpec);
+        var builder = TotalRejectedLinkCountJob.builder();
 
-        new TotalRejectedLinkCountJob(
-                params.getRequired("bootstrapServers"),
-                params.getRequired("sourceTopic"),
-                params.getRequired("redisHost"),
-                params.getInt("redisPort", 6379),
-                params.getRequired("redisKeyPrefix"),
-                assigner
-        ).run();
-    }
+        populateCommonFields(builder, params);
 
-    private static WindowSpec parseWindowSpec(ParameterTool params) {
+        TotalRejectedLinkCountJob job = builder.build();
 
-        return WindowSpec.builder()
-                .windowType(WindowType.valueOf(params.getRequired("windowType")))
-                .windowSize(params.has("windowSize") ? Duration.parse(params.get("windowSize")) : null)
-                .windowSlide(params.has("windowSlide") ? Duration.parse(params.get("windowSlide")) : null)
-                .sessionGap(params.has("sessionGap") ? Duration.parse(params.get("sessionGap")) : null)
-                .build();
+        job.run();
     }
 
     public void run() throws Exception {
@@ -101,10 +81,10 @@ public class TotalRejectedLinkCountJob extends AbstractJob {
         }
 
         @Override
-        public LinkCounter merge(LinkCounter linkCounter, LinkCounter acc1) {
+        public LinkCounter merge(LinkCounter linkCounter, LinkCounter other) {
 
-            linkCounter.totalLinks += acc1.totalLinks;
-            linkCounter.rejectedLinks += acc1.rejectedLinks;
+            linkCounter.totalLinks += other.totalLinks;
+            linkCounter.rejectedLinks += other.rejectedLinks;
             return linkCounter;
         }
 

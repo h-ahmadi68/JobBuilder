@@ -1,63 +1,38 @@
 package org.example.job_builder.job;
 
+import lombok.experimental.SuperBuilder;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.typeinfo.Types;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.windowing.ProcessAllWindowFunction;
-import org.apache.flink.streaming.api.windowing.assigners.WindowAssigner;
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.ParameterTool;
 import org.example.event.AskForLink;
 import org.example.event.PaymentEvent;
-import org.example.job_builder.model.WindowSpec;
-import org.example.job_builder.model.WindowType;
 import org.example.job_builder.model.WindowedCount;
-import org.example.job_builder.service.WindowAssignerFactory;
 import org.example.job_builder.utils.PaymentEventSourceFactory;
 import org.example.job_builder.utils.RedisSink;
 
 import java.time.Duration;
 
+@SuperBuilder
 public class TotalLinkSentCountJob extends AbstractJob {
 
     public static final String TOTAL_LINK_SENT_COUNT_JOB = "total-link-sent-count-job";
 
-    public TotalLinkSentCountJob(WindowAssigner<Object, TimeWindow> windowAssigner,
-                                 String bootstrapServers,
-                                 String sourceTopic,
-                                 String redisHost,
-                                 int redisPort,
-                                 String redisKeyPrefix) {
-        super(bootstrapServers, sourceTopic, redisHost, redisPort, redisKeyPrefix, windowAssigner);
-    }
-
     public static void main(String[] args) throws Exception {
         ParameterTool params = ParameterTool.fromArgs(args);
 
-        WindowSpec windowSpec = parseWindowSpec(params);
-        WindowAssigner<Object, TimeWindow> assigner = WindowAssignerFactory.from(windowSpec);
+        var builder = TotalLinkSentCountJob.builder();
 
-        new TotalLinkSentCountJob(
-                assigner,
-                params.getRequired("bootstrapServers"),
-                params.getRequired("sourceTopic"),
-                params.getRequired("redisHost"),
-                params.getInt("redisPort", 6379),
-                params.getRequired("redisKeyPrefix")
-        ).run();
-    }
+        populateCommonFields(builder, params);
 
-    private static WindowSpec parseWindowSpec(ParameterTool params) {
+        TotalLinkSentCountJob job = builder.build();
 
-        return WindowSpec.builder()
-                .windowType(WindowType.valueOf(params.getRequired("windowType")))
-                .windowSize(params.has("windowSize") ? Duration.parse(params.get("windowSize")) : null)
-                .windowSlide(params.has("windowSlide") ? Duration.parse(params.get("windowSlide")) : null)
-                .sessionGap(params.has("sessionGap") ? Duration.parse(params.get("sessionGap")) : null)
-                .build();
+        job.run();
     }
 
     public void run() throws Exception {
@@ -87,9 +62,9 @@ public class TotalLinkSentCountJob extends AbstractJob {
     private static class WindowedCountProcessFunction extends ProcessAllWindowFunction<Long, WindowedCount, TimeWindow> {
 
         /**
-         * @param context info about processing window
+         * @param context  info about processing window
          * @param elements it has only on element(count of link sent) why?
-         * @param out output of process, has only on element in it
+         * @param out      output of process, has only on element in it
          */
         @Override
         public void process(Context context, Iterable<Long> elements, Collector<WindowedCount> out) {
