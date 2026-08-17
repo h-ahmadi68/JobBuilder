@@ -1,4 +1,4 @@
-package org.example.jobbuilder.model;
+package org.example.job_builder.model;
 
 public enum WindowType {
     TUMBLING, // فقط windowSize لازم است
