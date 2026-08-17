@@ -1,4 +1,4 @@
-package org.example.job_builder.job;
+package org.example.job_builder.job.impl;
 
 import lombok.experimental.SuperBuilder;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -12,6 +12,7 @@ import org.apache.flink.util.Collector;
 import org.apache.flink.util.ParameterTool;
 import org.example.event.AskForLink;
 import org.example.event.PaymentEvent;
+import org.example.job_builder.job.AbstractJob;
 import org.example.job_builder.model.WindowedCount;
 import org.example.job_builder.utils.PaymentEventSourceFactory;
 import org.example.job_builder.utils.RedisSink;
@@ -44,6 +45,7 @@ public class TotalLinkSentCountJob extends AbstractJob {
         DataStream<PaymentEvent> events = env.fromSource(
                 source,
                 WatermarkStrategy.<PaymentEvent>forBoundedOutOfOrderness(Duration.ofSeconds(5))
+                        .withIdleness(Duration.ofSeconds(30))
                         .withTimestampAssigner((event, ts) -> event.timestamp().toEpochMilli()),
                 "payment_events_source"
         );

@@ -2,7 +2,7 @@ package org.example.job_builder.flink.impl;
 
 import lombok.experimental.SuperBuilder;
 import org.example.job_builder.flink.AbstractFlinkJobRequest;
-import org.example.job_builder.job.TotalRejectedLinkCountJob;
+import org.example.job_builder.job.impl.TotalRejectedLinkCountJob;
 import org.example.job_builder.model.WindowSpec;
 
 import java.util.List;

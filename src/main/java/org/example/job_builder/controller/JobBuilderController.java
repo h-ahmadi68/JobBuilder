@@ -23,4 +23,10 @@ class JobBuilderController {
         return ResponseEntity.accepted().body(jobId);
     }
 
+    @PostMapping("start-total-link-rejected")
+    public ResponseEntity<String> startTotalLinkRejected(@Valid @RequestBody WindowSpec request) {
+        String jobId = jobLaunchService.startTotalRejectedLinkJob(request);
+        return ResponseEntity.accepted().body(jobId);
+    }
+
 }

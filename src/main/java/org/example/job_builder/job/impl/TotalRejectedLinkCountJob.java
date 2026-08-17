@@ -1,6 +1,7 @@
-package org.example.job_builder.job;
+package org.example.job_builder.job.impl;
 
 import lombok.experimental.SuperBuilder;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.AggregateFunction;
 import org.apache.flink.api.common.typeinfo.Types;
@@ -14,12 +15,14 @@ import org.apache.flink.util.ParameterTool;
 import org.example.event.PaymentEvent;
 import org.example.event.RejectLink;
 import org.example.event.SendLink;
+import org.example.job_builder.job.AbstractJob;
 import org.example.job_builder.model.RejectedLinkState;
 import org.example.job_builder.utils.PaymentEventSourceFactory;
 import org.example.job_builder.utils.RejectedLinkRedisSink;
 
 import java.time.Duration;
 
+@Slf4j
 @SuperBuilder
 public class TotalRejectedLinkCountJob extends AbstractJob {
 
@@ -44,6 +47,7 @@ public class TotalRejectedLinkCountJob extends AbstractJob {
 
         DataStreamSource<PaymentEvent> paymentEvents = env.fromSource(paymentEventKafkaSource,
                 WatermarkStrategy.<PaymentEvent>forBoundedOutOfOrderness(Duration.ofSeconds(5))
+                        .withIdleness(Duration.ofSeconds(30))
                         .withTimestampAssigner((event, ts) -> event.timestamp().toEpochMilli()),
                 "payment_events_source");
 
