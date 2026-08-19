@@ -12,11 +12,12 @@ import org.apache.flink.util.ParameterTool;
 import org.example.job_builder.job.AbstractJob;
 import org.example.job_builder.model.SqlWindowResult;
 import org.example.job_builder.utils.SqlResultRedisSink;
+
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Base64;
-import java.util.Objects;
 
 @Slf4j
 @SuperBuilder
@@ -64,20 +65,20 @@ public class SqlRunnerJob extends AbstractJob {
         log.info("Converted Table to DataStream<Row>");
 
         DataStream<SqlWindowResult> mapped = resultStream.map(row -> {
+
             log.info("map() received row: {}", row);
             try {
-                LocalDateTime windowStart = (LocalDateTime) row.getField("window_start");
-                LocalDateTime windowEnd = (LocalDateTime) row.getField("window_end");
-                Number metricValue = (Number) row.getField("metric_value");
+                long startMillis = extractEpochMillis(row.getField("window_start"));
+                long endMillis = extractEpochMillis(row.getField("window_end"));
 
-                log.info("Parsed fields — windowStart={}, windowEnd={}, metricValue={}",
-                        windowStart, windowEnd, metricValue);
+                Object metricObj = row.getField("metric_value");
+                if (metricObj == null) {
+                    throw new IllegalArgumentException("metric_value is null in row: " + row);
+                }
+                double metricValue = ((Number) metricObj).doubleValue();
 
-                long startMillis = Objects.requireNonNull(windowStart).atZone(ZoneOffset.UTC).toInstant().toEpochMilli();
-                long endMillis = Objects.requireNonNull(windowEnd).atZone(ZoneOffset.UTC).toInstant().toEpochMilli();
-
-                SqlWindowResult result = new SqlWindowResult(startMillis, endMillis, Objects.requireNonNull(metricValue).doubleValue());
-                log.info("Mapped result: {}", result);
+                SqlWindowResult result = new SqlWindowResult(startMillis, endMillis, metricValue);
+                log.info("Mapped result successfully: {}", result);
                 return result;
             } catch (Exception e) {
                 log.error("Failed to map row: {}", row, e);
@@ -92,25 +93,33 @@ public class SqlRunnerJob extends AbstractJob {
         env.execute(SQL_RUNNER_JOB);
     }
 
-    private static void registerSourceTable(StreamTableEnvironment tEnv, String bootstrapServers, String sourceTopic) {
+    private static void registerSourceTable(
+            StreamTableEnvironment tEnv,
+            String bootstrapServers,
+            String sourceTopic
+    ) {
         String ddl = String.format("""
-                CREATE TABLE %s (
-                    `type` STRING,
-                    `timestamp` TIMESTAMP(3),
-                    WATERMARK FOR `timestamp` AS `timestamp` - INTERVAL '5' SECOND
-                ) WITH (
-                    'connector' = 'kafka',
-                    'topic' = '%s',
-                    'properties.bootstrap.servers' = '%s',
-                    'properties.group.id' = '%s',
-                    'scan.startup.mode' = 'latest-offset',
-                    'format' = 'json',
-                    'json.ignore-parse-errors' = 'true',
-                    'scan.watermark.idle-timeout' = '30s'
-                )
-                """, SOURCE_TABLE_NAME, sourceTopic, bootstrapServers, SQL_RUNNER_JOB);
+                        CREATE TABLE %s (
+                            `type` STRING,
+                            `timestamp` STRING
+                        ) WITH (
+                            'connector' = 'kafka',
+                            'topic' = '%s',
+                            'properties.bootstrap.servers' = '%s',
+                            'properties.group.id' = '%s',
+                            'scan.startup.mode' = 'latest-offset',
+                            'format' = 'json',
+                            'json.ignore-parse-errors' = 'false'
+                        )
+                        """,
+                SOURCE_TABLE_NAME,
+                sourceTopic,
+                bootstrapServers,
+                SQL_RUNNER_JOB
+        );
 
-        log.info("Registering source table with DDL:\n{}", ddl);
+        log.info("Registering source table:\n{}", ddl);
+
         tEnv.executeSql(ddl);
     }
 
@@ -126,6 +135,22 @@ public class SqlRunnerJob extends AbstractJob {
             throw new IllegalArgumentException(
                     "Query result must contain columns: window_start, window_end, metric_value. Found: " + columnNames);
         }
+    }
+
+    private static long extractEpochMillis(Object field) {
+        if (field == null) {
+            throw new IllegalArgumentException("Window timestamp field is null");
+        }
+        if (field instanceof Instant instant) {
+            return instant.toEpochMilli();
+        } else if (field instanceof LocalDateTime ldt) {
+            return ldt.atZone(ZoneOffset.UTC).toInstant().toEpochMilli();
+        } else if (field instanceof java.sql.Timestamp ts) {
+            return ts.getTime();
+        } else if (field instanceof Long l) {
+            return l;
+        }
+        throw new IllegalArgumentException("Unsupported timestamp class type: " + field.getClass().getName());
     }
 
     private static String decodeSql(String encodedSql) {
