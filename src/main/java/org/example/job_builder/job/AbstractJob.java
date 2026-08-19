@@ -21,9 +21,7 @@ public abstract class AbstractJob {
 
     public abstract void run() throws Exception;
 
-    protected static void populateCommonFields(
-            AbstractJobBuilder<?, ?> builder,
-            ParameterTool params) {
+    protected static void populateCommonFields(AbstractJobBuilder<?, ?> builder, ParameterTool params) {
         WindowSpec windowSpec = parseWindowSpec(params);
 
         WindowAssigner<Object, TimeWindow> assigner = WindowAssignerFactory.from(windowSpec);
@@ -38,6 +36,7 @@ public abstract class AbstractJob {
     }
 
     private static WindowSpec parseWindowSpec(ParameterTool params) {
+
         return WindowSpec.builder()
                 .windowType(WindowType.valueOf(params.getRequired("windowType")))
                 .windowSize(params.has("windowSize") ? Duration.parse(params.get("windowSize")) : null)
