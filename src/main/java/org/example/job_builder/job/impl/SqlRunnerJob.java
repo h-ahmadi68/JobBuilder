@@ -1,7 +1,6 @@
 package org.example.job_builder.job.impl;
 
 import lombok.experimental.SuperBuilder;
-import lombok.extern.slf4j.Slf4j;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.EnvironmentSettings;
@@ -19,7 +18,6 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Base64;
 
-@Slf4j
 @SuperBuilder
 public class SqlRunnerJob extends AbstractJob {
 
@@ -40,10 +38,6 @@ public class SqlRunnerJob extends AbstractJob {
                 .userSql(decodeSql(params.getRequired("sql")))
                 .build();
 
-        log.info("Starting SqlRunnerJob. bootstrapServers={}, sourceTopic={}, redisHost={}, redisPort={}, redisKeyPrefix={}",
-                job.bootstrapServers, job.sourceTopic, job.redisHost, job.redisPort, job.redisKeyPrefix);
-        log.info("Decoded user SQL:\n{}", job.userSql);
-
         job.run();
     }
 
@@ -53,43 +47,27 @@ public class SqlRunnerJob extends AbstractJob {
         StreamTableEnvironment tEnv = StreamTableEnvironment.create(env, settings);
 
         registerSourceTable(tEnv, bootstrapServers, sourceTopic);
-        log.info("Source table '{}' registered", SOURCE_TABLE_NAME);
 
         Table resultTable = tEnv.sqlQuery(userSql);
-        log.info("Query parsed. Resolved schema: {}", resultTable.getResolvedSchema());
-
         validateResultSchema(resultTable);
-        log.info("Schema validation passed");
 
         DataStream<Row> resultStream = tEnv.toDataStream(resultTable);
-        log.info("Converted Table to DataStream<Row>");
 
         DataStream<SqlWindowResult> mapped = resultStream.map(row -> {
+            long startMillis = extractEpochMillis(row.getField("window_start"));
+            long endMillis = extractEpochMillis(row.getField("window_end"));
 
-            log.info("map() received row: {}", row);
-            try {
-                long startMillis = extractEpochMillis(row.getField("window_start"));
-                long endMillis = extractEpochMillis(row.getField("window_end"));
-
-                Object metricObj = row.getField("metric_value");
-                if (metricObj == null) {
-                    throw new IllegalArgumentException("metric_value is null in row: " + row);
-                }
-                double metricValue = ((Number) metricObj).doubleValue();
-
-                SqlWindowResult result = new SqlWindowResult(startMillis, endMillis, metricValue);
-                log.info("Mapped result successfully: {}", result);
-                return result;
-            } catch (Exception e) {
-                log.error("Failed to map row: {}", row, e);
-                throw e;
+            Object metricObj = row.getField("metric_value");
+            if (metricObj == null) {
+                throw new IllegalArgumentException("metric_value is null in row: " + row);
             }
+            double metricValue = ((Number) metricObj).doubleValue();
+
+            return new SqlWindowResult(startMillis, endMillis, metricValue);
         });
 
-        log.info("Attaching Redis sink with keyPrefix={}", redisKeyPrefix);
         mapped.sinkTo(new SqlResultRedisSink(redisHost, redisPort, redisKeyPrefix));
 
-        log.info("Calling env.execute()");
         env.execute(SQL_RUNNER_JOB);
     }
 
@@ -101,7 +79,9 @@ public class SqlRunnerJob extends AbstractJob {
         String ddl = String.format("""
                         CREATE TABLE %s (
                             `type` STRING,
-                            `timestamp` STRING
+                            `timestamp` STRING,
+                            event_time AS TO_TIMESTAMP(SUBSTR(REPLACE(`timestamp`, 'T', ' '), 1, 23), 'yyyy-MM-dd HH:mm:ss.SSS'),
+                            WATERMARK FOR event_time AS event_time - INTERVAL '5' SECOND
                         ) WITH (
                             'connector' = 'kafka',
                             'topic' = '%s',
@@ -109,7 +89,8 @@ public class SqlRunnerJob extends AbstractJob {
                             'properties.group.id' = '%s',
                             'scan.startup.mode' = 'latest-offset',
                             'format' = 'json',
-                            'json.ignore-parse-errors' = 'false'
+                            'json.ignore-parse-errors' = 'true',
+                            'scan.watermark.idle-timeout' = '30s'
                         )
                         """,
                 SOURCE_TABLE_NAME,
@@ -118,14 +99,11 @@ public class SqlRunnerJob extends AbstractJob {
                 SQL_RUNNER_JOB
         );
 
-        log.info("Registering source table:\n{}", ddl);
-
         tEnv.executeSql(ddl);
     }
 
     private static void validateResultSchema(Table table) {
         var columnNames = table.getResolvedSchema().getColumnNames();
-        log.info("Validating schema, columns found: {}", columnNames);
 
         boolean valid = columnNames.contains("window_start")
                 && columnNames.contains("window_end")
