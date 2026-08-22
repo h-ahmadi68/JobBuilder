@@ -43,9 +43,9 @@ public class TotalRejectedLinkCountJob extends AbstractJob {
     public void run() throws Exception {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 
-        KafkaSource<PaymentEvent> paymentEventKafkaSource = PaymentEventSourceFactory.create(bootstrapServers, sourceTopic, TOTAL_REJECTED_LINK_COUNT_JOB);
+        KafkaSource<PaymentEvent> source = PaymentEventSourceFactory.create(bootstrapServers, sourceTopic, TOTAL_REJECTED_LINK_COUNT_JOB);
 
-        DataStreamSource<PaymentEvent> paymentEvents = env.fromSource(paymentEventKafkaSource,
+        DataStreamSource<PaymentEvent> paymentEvents = env.fromSource(source,
                 WatermarkStrategy.<PaymentEvent>forBoundedOutOfOrderness(Duration.ofSeconds(5))
                         .withIdleness(Duration.ofSeconds(30))
                         .withTimestampAssigner((event, ts) -> event.timestamp().toEpochMilli()),
