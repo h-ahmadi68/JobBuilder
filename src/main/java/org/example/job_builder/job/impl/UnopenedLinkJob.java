@@ -3,21 +3,24 @@ package org.example.job_builder.job.impl;
 import lombok.Builder;
 import lombok.experimental.SuperBuilder;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.functions.AggregateFunction;
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.state.v2.ValueState;
 import org.apache.flink.api.common.state.v2.ValueStateDescriptor;
-import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.connector.kafka.source.KafkaSource;
+import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
+import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction;
+import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.ParameterTool;
 import org.example.event.OpenLink;
 import org.example.event.PaymentEvent;
 import org.example.event.SendLink;
 import org.example.job_builder.job.AbstractJob;
-import org.example.job_builder.model.UserUnOpenedCount;
+import org.example.job_builder.model.UserUnopenedCount;
 import org.example.job_builder.utils.PaymentEventSourceFactory;
 
 import java.io.Serializable;
@@ -25,23 +28,24 @@ import java.time.Duration;
 import java.time.Instant;
 
 @SuperBuilder
-public class UnOpenedLinkJob extends AbstractJob {
+public class UnopenedLinkJob extends AbstractJob {
 
     private final long duration;
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         ParameterTool params = ParameterTool.fromArgs(args);
 
-        UnOpenedLinkJobBuilder<?, ?> builder = UnOpenedLinkJob.builder();
+        UnopenedLinkJobBuilder<?, ?> builder = UnopenedLinkJob.builder();
         populateCommonFields(builder, params);
 
         builder.build().run();
     }
 
     @Override
-    public void run() {
+    public void run() throws Exception {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        KafkaSource<PaymentEvent> source = PaymentEventSourceFactory.create(bootstrapServers, sourceTopic, getClass().getName());
+        KafkaSource<PaymentEvent> source =
+                PaymentEventSourceFactory.create(bootstrapServers, sourceTopic, getClass().getName());
 
         DataStreamSource<PaymentEvent> events = env.fromSource(source,
                 WatermarkStrategy.<PaymentEvent>forBoundedOutOfOrderness(Duration.ofSeconds(5))
@@ -49,8 +53,8 @@ public class UnOpenedLinkJob extends AbstractJob {
                         .withTimestampAssigner((event, ts) -> event.timestamp().toEpochMilli()),
                 "payment_events_source");
 
-        events.filter(event ->
-                        event instanceof SendLink || event instanceof OpenLink)
+        DataStream<UnopenedLinkEvent> unopened = events
+                .filter(event -> event instanceof SendLink || event instanceof OpenLink)
                 .keyBy(event -> {
                     if (event instanceof SendLink sendLink) {
                         return sendLink.paymentLinkId();
@@ -62,13 +66,15 @@ public class UnOpenedLinkJob extends AbstractJob {
 
                     throw new IllegalStateException("Unexpected event type: " + event.getClass());
                 })
-                .process(new UnopenedLinkDetector(Duration.ofMillis(duration)))
-                .returns(TypeInformation.of(UnopenedLinkEvent.class))
+                .process(new UnopenedLinkDetector(Duration.ofMillis(duration)));
+
+        DataStream<UserUnopenedCount> result = unopened
                 .keyBy(UnopenedLinkEvent::userId)
-                .process(new UserUnOpenedCounter())
-                .returns(TypeInformation.of(UserUnOpenedCount.class));
+                .window(windowAssigner)
+                .aggregate(new UnopenedCountAggregator(), new AttachWindowData());
 
 
+        env.execute(getClass().getSimpleName());
     }
 
 
@@ -93,8 +99,12 @@ public class UnOpenedLinkJob extends AbstractJob {
 
             if (event instanceof SendLink sendLink) {
                 long sendTs = sendLink.timestamp().toEpochMilli();
-                pendingLinkState.update(
-                        new PendingLink(sendLink.userId(), sendLink.paymentLinkId(), sendTs));
+                pendingLinkState.update(PendingLink.builder()
+                        .userId(sendLink.userId())
+                        .paymentLinkId(sendLink.paymentLinkId())
+                        .sendTimestamp(sendTs)
+                        .build());
+
                 ctx.timerService().registerEventTimeTimer(sendTs + timeoutMillis);
 
             } else if (event instanceof OpenLink) {
@@ -108,51 +118,67 @@ public class UnOpenedLinkJob extends AbstractJob {
         }
 
         @Override
-        public void onTimer(long timestamp, KeyedProcessFunction<String, PaymentEvent, UnopenedLinkEvent>.OnTimerContext ctx, Collector<UnopenedLinkEvent> out) {
+        public void onTimer(long timestamp, OnTimerContext ctx,
+                            Collector<UnopenedLinkEvent> out) {
 
             PendingLink pendingLink = pendingLinkState.value();
             if (pendingLink != null) {
                 out.collect(UnopenedLinkEvent.builder()
                         .userId(pendingLink.userId())
                         .paymentLinkId(pendingLink.paymentLinkId())
-                        .endAt(Instant.ofEpochMilli(pendingLink.sendTimestamp()))
+                        .endAt(Instant.ofEpochMilli(timestamp))
                         .build());
                 pendingLinkState.clear();
             }
         }
-
     }
 
-    private static class UserUnOpenedCounter extends KeyedProcessFunction<String, UnopenedLinkEvent, UserUnOpenedCount> {
-
-        private transient ValueState<Long> countState;
+    private static class UnopenedCountAggregator
+            implements AggregateFunction<UnopenedLinkEvent, Long, Long> {
 
         @Override
-        public void open(OpenContext openContext) {
-            countState = getRuntimeContext().getState(
-                    new ValueStateDescriptor<>("unopened-count", Long.class));
+        public Long createAccumulator() {
+            return 0L;
         }
 
         @Override
-        public void processElement(UnopenedLinkEvent unopenedLinkEvent, KeyedProcessFunction<String, UnopenedLinkEvent, UserUnOpenedCount>.Context context, Collector<UserUnOpenedCount> collector) {
-            long current = (countState.value() == null ? 0L : countState.value()) + 1;
-            countState.update(current);
-            collector.collect(UserUnOpenedCount.builder()
-                    .userId(unopenedLinkEvent.userId)
-                    .unOpenedLinkCount(current)
+        public Long add(UnopenedLinkEvent unopenedLinkEvent, Long accumulator) {
+            return accumulator + 1;
+        }
+
+        @Override
+        public Long getResult(Long accumulator) {
+            return accumulator;
+        }
+
+        @Override
+        public Long merge(Long a, Long b) {
+            return a + b;
+        }
+    }
+
+    private static class AttachWindowData extends ProcessWindowFunction<Long, UserUnopenedCount, String, TimeWindow> {
+
+        @Override
+        public void process(String userId, Context context,
+                            Iterable<Long> aggregatedResult, Collector<UserUnopenedCount> collector) {
+            long unopenedLinks = aggregatedResult.iterator().next();
+
+            collector.collect(UserUnopenedCount.builder()
+                    .userId(userId)
+                    .unopenedLinksCount(unopenedLinks)
                     .build());
         }
 
     }
 
     @Builder
-    private record UnopenedLinkEvent(String userId, String paymentLinkId, Instant endAt) implements Serializable {
-
+    private record UnopenedLinkEvent(String userId, String paymentLinkId, Instant endAt)
+            implements Serializable {
     }
 
     @Builder
     public record PendingLink(String userId, String paymentLinkId, long sendTimestamp)
             implements Serializable {
     }
-
 }
