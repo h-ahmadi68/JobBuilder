@@ -2,6 +2,7 @@ package org.example.job_builder.flink;
 
 import lombok.experimental.SuperBuilder;
 import org.example.job_builder.job.AbstractJob;
+import org.example.job_builder.model.WindowSpec;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -39,6 +40,14 @@ public abstract class AbstractFlinkJobRequest<J extends AbstractJob> implements 
     }
 
     protected abstract void appendJobSpecificArgs(List<String> args);
+
+    protected void addWindowSpecToArgs(List<String> args, WindowSpec windowSpec) {
+        args.add("--windowType");
+        args.add(windowSpec.windowType().name());
+        appendIfPresent(args, "--windowSize", windowSpec.windowSize());
+        appendIfPresent(args, "--windowSlide", windowSpec.windowSlide());
+        appendIfPresent(args, "--sessionGap", windowSpec.sessionGap());
+    }
 
     protected void appendIfPresent(List<String> args, String flag, Duration value) {
         if (value != null) {

@@ -14,11 +14,7 @@ public class TotalLinkSentJobRequest extends AbstractFlinkJobRequest<TotalLinkSe
 
     @Override
     protected void appendJobSpecificArgs(List<String> args) {
-        args.add("--windowType");
-        args.add(windowSpec.windowType().name());
-        appendIfPresent(args, "--windowSize", windowSpec.windowSize());
-        appendIfPresent(args, "--windowSlide", windowSpec.windowSlide());
-        appendIfPresent(args, "--sessionGap", windowSpec.sessionGap());
+        addWindowSpecToArgs(args, windowSpec);
     }
 
     @Override

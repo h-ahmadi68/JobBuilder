@@ -4,6 +4,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.example.job_builder.model.SqlJobSubmitRequest;
 import org.example.job_builder.model.WindowSpec;
+import org.example.job_builder.model.input.UnopenedLinkCountJobInputDto;
 import org.example.job_builder.service.JobLaunchService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -30,6 +31,12 @@ class JobBuilderController {
     @PostMapping("submit-sql")
     public ResponseEntity<String> submitSql(@Valid @RequestBody SqlJobSubmitRequest request) {
         String jobId = jobLaunchService.submitSql(request);
+        return ResponseEntity.accepted().body(jobId);
+    }
+
+    @PostMapping("satrt-unopened-link-job")
+    public ResponseEntity<String> startUnopenedLinkJob(@Valid @RequestBody UnopenedLinkCountJobInputDto request) {
+        String jobId = jobLaunchService.submitUnopenedLinkCountJob(request);
         return ResponseEntity.accepted().body(jobId);
     }
 

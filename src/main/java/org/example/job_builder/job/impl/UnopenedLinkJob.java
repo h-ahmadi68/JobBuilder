@@ -5,8 +5,8 @@ import lombok.experimental.SuperBuilder;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.AggregateFunction;
 import org.apache.flink.api.common.functions.OpenContext;
-import org.apache.flink.api.common.state.v2.ValueState;
-import org.apache.flink.api.common.state.v2.ValueStateDescriptor;
+import org.apache.flink.api.common.state.ValueState;
+import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
@@ -20,9 +20,11 @@ import org.example.event.OpenLink;
 import org.example.event.PaymentEvent;
 import org.example.event.SendLink;
 import org.example.job_builder.job.AbstractJob;
-import org.example.job_builder.model.UserUnopenedCount;
+import org.example.job_builder.model.UserUnopenedLinkCount;
 import org.example.job_builder.utils.PaymentEventSourceFactory;
+import org.example.job_builder.utils.UserUnopenedCountRedisSink;
 
+import java.io.IOException;
 import java.io.Serializable;
 import java.time.Duration;
 import java.time.Instant;
@@ -35,7 +37,8 @@ public class UnopenedLinkJob extends AbstractJob {
     public static void main(String[] args) throws Exception {
         ParameterTool params = ParameterTool.fromArgs(args);
 
-        UnopenedLinkJobBuilder<?, ?> builder = UnopenedLinkJob.builder();
+        UnopenedLinkJobBuilder<?, ?> builder = UnopenedLinkJob.builder()
+                .duration(Long.parseLong(params.getRequired("duration")));
         populateCommonFields(builder, params);
 
         builder.build().run();
@@ -68,11 +71,10 @@ public class UnopenedLinkJob extends AbstractJob {
                 })
                 .process(new UnopenedLinkDetector(Duration.ofMillis(duration)));
 
-        DataStream<UserUnopenedCount> result = unopened
-                .keyBy(UnopenedLinkEvent::userId)
+        unopened.keyBy(UnopenedLinkEvent::userId)
                 .window(windowAssigner)
-                .aggregate(new UnopenedCountAggregator(), new AttachWindowData());
-
+                .aggregate(new UnopenedCountAggregator(), new AttachWindowData())
+                .sinkTo(new UserUnopenedCountRedisSink(redisHost, redisPort, redisKeyPrefix));
 
         env.execute(getClass().getSimpleName());
     }
@@ -95,7 +97,7 @@ public class UnopenedLinkJob extends AbstractJob {
 
         @Override
         public void processElement(PaymentEvent event, Context ctx,
-                                   Collector<UnopenedLinkEvent> out) {
+                                   Collector<UnopenedLinkEvent> out) throws IOException {
 
             if (event instanceof SendLink sendLink) {
                 long sendTs = sendLink.timestamp().toEpochMilli();
@@ -119,7 +121,7 @@ public class UnopenedLinkJob extends AbstractJob {
 
         @Override
         public void onTimer(long timestamp, OnTimerContext ctx,
-                            Collector<UnopenedLinkEvent> out) {
+                            Collector<UnopenedLinkEvent> out) throws IOException {
 
             PendingLink pendingLink = pendingLinkState.value();
             if (pendingLink != null) {
@@ -157,16 +159,18 @@ public class UnopenedLinkJob extends AbstractJob {
         }
     }
 
-    private static class AttachWindowData extends ProcessWindowFunction<Long, UserUnopenedCount, String, TimeWindow> {
+    private static class AttachWindowData extends ProcessWindowFunction<Long, UserUnopenedLinkCount, String, TimeWindow> {
 
         @Override
         public void process(String userId, Context context,
-                            Iterable<Long> aggregatedResult, Collector<UserUnopenedCount> collector) {
+                            Iterable<Long> aggregatedResult, Collector<UserUnopenedLinkCount> collector) {
             long unopenedLinks = aggregatedResult.iterator().next();
 
-            collector.collect(UserUnopenedCount.builder()
+            collector.collect(UserUnopenedLinkCount.builder()
                     .userId(userId)
                     .unopenedLinksCount(unopenedLinks)
+                    .windowStart(context.window().getStart())
+                    .windowEnd(context.window().getEnd())
                     .build());
         }
 
@@ -181,4 +185,5 @@ public class UnopenedLinkJob extends AbstractJob {
     public record PendingLink(String userId, String paymentLinkId, long sendTimestamp)
             implements Serializable {
     }
+
 }
