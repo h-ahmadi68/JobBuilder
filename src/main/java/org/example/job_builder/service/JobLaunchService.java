@@ -6,11 +6,17 @@ import org.example.job_builder.config.FlinkConfiguration;
 import org.example.job_builder.config.KafkaJobProperties;
 import org.example.job_builder.config.RedisJobProperties;
 import org.example.job_builder.flink.FlinkJobRequest;
+import org.example.job_builder.flink.impl.SqlJobRequest;
 import org.example.job_builder.flink.impl.TotalLinkSentJobRequest;
 import org.example.job_builder.flink.impl.TotalRejectedLinkJobRequest;
+import org.example.job_builder.flink.impl.UnopenedLinkJobRequest;
+import org.example.job_builder.job.impl.SqlRunnerJob;
 import org.example.job_builder.job.impl.TotalLinkSentCountJob;
 import org.example.job_builder.job.impl.TotalRejectedLinkCountJob;
+import org.example.job_builder.job.impl.UnopenedLinkJob;
+import org.example.job_builder.model.SqlJobSubmitRequest;
 import org.example.job_builder.model.WindowSpec;
+import org.example.job_builder.model.input.UnopenedLinkCountJobInputDto;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -36,6 +42,32 @@ public class JobLaunchService {
     private final RedisJobProperties redisJobProperties;
 
     private volatile String cachedJarId;
+
+    public String submitUnopenedLinkCountJob(UnopenedLinkCountJobInputDto request) {
+        FlinkJobRequest<UnopenedLinkJob> flinkJobRequest = UnopenedLinkJobRequest.builder()
+                .bootstrapServers(kafkaJobProperties.bootstrapServers())
+                .sourceTopic(kafkaJobProperties.sourceTopic())
+                .redisHost(redisJobProperties.host())
+                .redisPort(redisJobProperties.port())
+                .duration(request.duration())
+                .windowSpec(request.windowSpec())
+                .build();
+
+        return submitJob(flinkJobRequest);
+    }
+
+    public String submitSql(SqlJobSubmitRequest submitRequest) {
+        FlinkJobRequest<SqlRunnerJob> request = SqlJobRequest.builder()
+                .sql(submitRequest.sql())
+                .bootstrapServers(kafkaJobProperties.bootstrapServers())
+                .sourceTopic(kafkaJobProperties.sourceTopic())
+                .redisHost(redisJobProperties.host())
+                .redisPort(redisJobProperties.port())
+                .redisKeyPrefix(submitRequest.redisKeyPrefix())
+                .build();
+
+        return submitJob(request);
+    }
 
     public String startTotalLinkSentJob(WindowSpec windowSpec) {
         FlinkJobRequest<TotalLinkSentCountJob> request = TotalLinkSentJobRequest.builder()

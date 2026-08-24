@@ -65,8 +65,8 @@ public class TotalLinkSentCountJob extends AbstractJob {
 
         /**
          * @param context  info about processing window
-         * @param elements it has only on element(count of link sent) why?
-         * @param out      output of process, has only on element in it
+         * @param elements it has only one element(count of link sent) why?
+         * @param out      output of process, has only one element in it
          */
         @Override
         public void process(Context context, Iterable<Long> elements, Collector<WindowedCount> out) {

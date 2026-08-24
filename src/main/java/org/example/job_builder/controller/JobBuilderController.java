@@ -2,13 +2,12 @@ package org.example.job_builder.controller;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.example.job_builder.model.SqlJobSubmitRequest;
 import org.example.job_builder.model.WindowSpec;
+import org.example.job_builder.model.input.UnopenedLinkCountJobInputDto;
 import org.example.job_builder.service.JobLaunchService;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 @RequiredArgsConstructor
 @RestController
@@ -26,6 +25,18 @@ class JobBuilderController {
     @PostMapping("start-total-link-rejected")
     public ResponseEntity<String> startTotalLinkRejected(@Valid @RequestBody WindowSpec request) {
         String jobId = jobLaunchService.startTotalRejectedLinkJob(request);
+        return ResponseEntity.accepted().body(jobId);
+    }
+
+    @PostMapping("submit-sql")
+    public ResponseEntity<String> submitSql(@Valid @RequestBody SqlJobSubmitRequest request) {
+        String jobId = jobLaunchService.submitSql(request);
+        return ResponseEntity.accepted().body(jobId);
+    }
+
+    @PostMapping("satrt-unopened-link-job")
+    public ResponseEntity<String> startUnopenedLinkJob(@Valid @RequestBody UnopenedLinkCountJobInputDto request) {
+        String jobId = jobLaunchService.submitUnopenedLinkCountJob(request);
         return ResponseEntity.accepted().body(jobId);
     }
 
