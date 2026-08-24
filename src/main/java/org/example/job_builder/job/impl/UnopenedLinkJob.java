@@ -2,6 +2,7 @@ package org.example.job_builder.job.impl;
 
 import lombok.Builder;
 import lombok.experimental.SuperBuilder;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.AggregateFunction;
 import org.apache.flink.api.common.functions.OpenContext;
@@ -29,6 +30,7 @@ import java.io.Serializable;
 import java.time.Duration;
 import java.time.Instant;
 
+@Slf4j
 @SuperBuilder
 public class UnopenedLinkJob extends AbstractJob {
 
@@ -69,7 +71,7 @@ public class UnopenedLinkJob extends AbstractJob {
 
                     throw new IllegalStateException("Unexpected event type: " + event.getClass());
                 })
-                .process(new UnopenedLinkDetector(Duration.ofMillis(duration)));
+                .process(new UnopenedLinkDetector(Duration.ofSeconds(duration)));
 
         unopened.keyBy(UnopenedLinkEvent::userId)
                 .window(windowAssigner)
