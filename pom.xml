@@ -171,7 +171,7 @@
                             <transformers>
                                 <transformer
                                         implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>org.example.job_builder.job.impl.TotalLinkSentCountJob</mainClass>
+                                    <mainClass>org.example.job_builder.flink.job.impl.TotalLinkSentCountJob</mainClass>
                                 </transformer>
                             </transformers>
                         </configuration>
